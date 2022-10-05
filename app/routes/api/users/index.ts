@@ -1,9 +1,52 @@
 import { PrismaClient } from "@prisma/client";
-import { ActionFunction, json } from "@remix-run/node";
+import type {
+  ActionFunction,
+  AppData,
+  DataFunctionArgs,
+  LoaderFunction,
+} from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { verify } from "jsonwebtoken";
+import { promisify } from "util";
 
 const prisma = new PrismaClient();
+const verifyPromise: (arg1, arg2) => Promise<any> = promisify(verify);
 
-export async function loader() {
+function withUser(
+  callback: (
+    args: DataFunctionArgs,
+    user: any
+  ) => Promise<Response> | Promise<AppData>
+): (args: DataFunctionArgs) => Promise<Response> | Promise<AppData> {
+  return (args: DataFunctionArgs) =>
+    new Promise(async (resolve, reject) => {
+      const token =
+        args.request.headers.get("Authorization")?.split(" ")?.[1] ?? "";
+      console.log(token);
+
+      try {
+        const result = await verifyPromise(token, "secret");
+        console.log(result);
+        return resolve(callback(args, result));
+      } catch (error) {
+        reject(
+          json(
+            { message: "Unauthorized" },
+            {
+              status: 401,
+              statusText: "Unauthorized",
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          )
+        );
+      }
+    });
+}
+
+export const loader: LoaderFunction = withUser(async (request, user) => {
+  console.log({ request, user });
   const users = await prisma.user.findMany();
   return new Response(JSON.stringify(users), {
     status: 200,
@@ -11,7 +54,7 @@ export async function loader() {
       "Content-Type": "application/json",
     },
   });
-}
+});
 
 export const action: ActionFunction = async ({ request }) => {
   switch (request.method) {
